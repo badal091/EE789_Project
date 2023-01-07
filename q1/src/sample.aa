@@ -1,0 +1,35 @@
+$module [rpmethod] 
+$in (a: $float<8,23>) 
+$out (b: $float<8,23>)
+$is
+{
+	$constant t: $float<8,23> := _f1.0e-6
+	$constant f_2: $float<8,23> := _f2.0e+0
+
+	$storage y: $float<8,23>
+	y := _f1.0e+0
+	int_a := ($bitcast ($uint<32>) a)
+
+	a_m := ($slice a 22 0)
+	a_e := ($slice a 30 23)
+	a_s := ($slice a 31 31) 
+	y_m := ($slice y 22 0)
+	y_e := ($slice y 30 23)
+	y_s := ($slice y 31 31)
+
+	y_e_f := ($bitcast ($uint<8>) (254 - ($bitcast ($uint<8>) a_e)))
+	y_s_f := ($bitcast ($uint<1>) a_s)
+	y := ($bitcast ($float<8,23>) ($concat y_s_f y_e_f y_m))
+
+	$branchblock[loop]{
+		$merge $entry loopback
+			$phi y_new := (y * (f_2 - (a * y))) $on $entry (y * (f_2 - (a * y))) $on loopback
+		$endmerge
+		$if (((y_new - y) > t) | ((y - y_new) > t)) $then
+			y := ($bitcast ($float<8,23>) y_new)
+			$place [loopback]
+		$endif
+		result := y
+	}(result => b_load)
+	b := b_load
+}

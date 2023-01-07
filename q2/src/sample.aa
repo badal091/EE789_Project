@@ -1,0 +1,146 @@
+$constant n: $uint<8> := 14
+$constant n1: $uint<8> := 15
+$constant n2: $uint<8> := 16
+
+$pipe input: $float<8,23> 
+$pipe output: $float<8,23>
+
+$module [rpmethod] 
+$in (a: $float<8,23>) 
+$out (b: $float<8,23>)
+$is
+{
+	$constant t: $float<8,23> := _f1.0e-6
+	$constant f_2: $float<8,23> := _f2.0e+0
+	$storage y: $float<8,23>
+	$storage A: $array[16][17] $of $float<8,23>
+	$storage X: $array[16] $of $float<8,23>
+	y := _f1.0e+0
+	int_a := ($bitcast ($uint<32>) a)
+
+	a_m := ($slice a 22 0)
+	a_e := ($slice a 30 23)
+	a_s := ($slice a 31 31) 
+	y_m := ($slice y 22 0)
+	y_e := ($slice y 30 23)
+	y_s := ($slice y 31 31)
+
+	y_e_f := ($bitcast ($uint<8>) (254 - ($bitcast ($uint<8>) a_e)))
+	y_s_f := ($bitcast ($uint<1>) a_s)
+	y := ($bitcast ($float<8,23>) ($concat y_s_f y_e_f y_m))
+
+	$branchblock[loop]{
+		$merge $entry loopback
+			$phi y_new := (y * (f_2 - (a * y))) $on $entry (y * (f_2 - (a * y))) $on loopback
+		$endmerge
+		$if (((y_new - y) > t) | ((y - y_new) > t)) $then
+			y := ($bitcast ($float<8,23>) y_new)
+			$place [loopback]
+		$endif
+		result := y
+	}(result => b_load)
+	b := b_load
+}
+
+$module [divider] 
+$in (a b : $float<8,23>) 
+$out (result  : $float<8,23>) 
+$is
+{
+	$call rpmethod (b) (rec)
+	result := (rec*a)
+}
+
+$module [gauss_test] $in () $out () $is
+{
+  $branchblock[loop] {
+
+    $merge $entry loop_out 
+	$phi I := $zero<5> $on $entry nI $on loop_out
+    $endmerge 
+      nI := (I + 1)
+
+    $merge $entry loop_inback 
+	$phi J := (I+1) $on $entry nJ $on loop_inback 
+	$endmerge
+      nJ := (J + 1)
+
+   mul := _f1.00e+0
+
+    $dopipeline $depth 15 $fullrate 
+    $merge $entry  $loopback
+        $phi K := $zero<5> $on $entry nI $on $loopback
+    $endmerge
+	  nK := (K + 1)
+        T := (mul*A[I][K])
+        A[J][K] := (A[J][K] - T)
+
+    $while  (K <16)
+
+    $if (J < 15) $then $place [loop_inback] $endif
+    $if (I < 14) $then $place [loop_out] $endif
+
+	$call divider (A[15][16] A[15][15]) (res1) 
+	X[15] := res1
+
+	$merge $entry loop_out1
+	$phi I1 := n $on $entry nI1 $on loop_out1
+    $endmerge 
+      nI1 := (I1 - 1)
+
+	X[I]:= A[I][16]
+
+	$dopipeline $depth 15 $fullrate 
+    $merge $entry  $loopback
+        $phi J1 := (I1 + 1) $on $entry nJ1 $on $loopback
+    $endmerge
+      nJ1 := (J1 + 1)
+
+	T1 := (A[I1][J1]*X[J1])
+	X[I] := (X[I1]-T1)
+
+	$while (J1<15)
+
+	$call divider (X[I1] A[I1][I1]) (res2) 
+	X[I1] := res2
+
+	$if (I > 0) $then $place [loop_out1] $endif
+
+ }
+}
+$module [ping_daemon] $in () $out () $is
+{
+	$branchblock[loop] {
+		$merge $entry loopback $endmerge
+			
+			$merge $entry loop_out 
+				$phi I := $zero<8> $on $entry nI $on loop_out
+			$endmerge
+			
+			$merge $entry loop_inback 
+				$phi J := $zero<8> $on $entry nJ $on loop_inback
+			$endmerge
+			
+			A[I][J] := input
+			
+			nJ := (J + 1)
+			$if (J < n2) $then $place [loop_inback] $endif
+			nI := (I + 1)
+			
+			$if (I < n1) $then $place [loop_out] $endif
+			
+			$call gauss_test () ()
+			
+			$merge $entry output_loopback 
+				$phi K := $zero<8> $on $entry nK $on output_loopback
+			$endmerge
+			
+			output := X[K]
+			
+			nK := (K + 1)
+			
+			$if (K < n1) $then $place [output_loopback] $endif
+			
+		$place [loopback]
+	}
+}
